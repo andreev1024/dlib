@@ -42,17 +42,28 @@
 */
 
 
+
+//  cmake --build . --config Releas
+
+//  for one file
+//      cd ~/www/dlib-prod/build$ && ./facedetect ./../mmod_human_face_detector.dat ./../shape_predictor_68_face_landmarks.dat faces/1.jpg
+//  for many files
+//      cd ~/www/dlib-prod/build$ && ./facedetect ./../mmod_human_face_detector.dat ./../shape_predictor_68_face_landmarks.dat faces/*.jpg
+
+//  Links:
+//  http://dlib.net/files/mmod_human_face_detector.dat.bz2
+
 #include <iostream>
 #include <dlib/dnn.h>
 #include <dlib/data_io.h>
-#include <chrono>
+#include <nlohmann/json.hpp>
 
 using namespace std;
 using namespace dlib;
 using namespace std::chrono;
+using json = nlohmann::json;
 
 // ----------------------------------------------------------------------------------------
-
 template <long num_filters, typename SUBNET> using con5d = con<num_filters,5,5,2,2,SUBNET>;
 template <long num_filters, typename SUBNET> using con5  = con<num_filters,5,5,1,1,SUBNET>;
 
@@ -60,29 +71,30 @@ template <typename SUBNET> using downsampler  = relu<affine<con5d<32, relu<affin
 template <typename SUBNET> using rcon5  = relu<affine<con5<45,SUBNET>>>;
 
 using net_type = loss_mmod<con<1,9,9,1,1,rcon5<rcon5<rcon5<downsampler<input_rgb_image_pyramid<pyramid_down<6>>>>>>>>;
-
 // ----------------------------------------------------------------------------------------
 
 
 int main(int argc, char** argv) try
 {
-    if (argc == 1)
+
+    if (argc == 1 || argc == 2)
     {
         cout << "Call this program like this:" << endl;
-        cout << "./dnn_mmod_face_detection_ex mmod_human_face_detector.dat faces/*.jpg" << endl;
-        cout << "\nYou can get the mmod_human_face_detector.dat file from:\n";
-        cout << "http://dlib.net/files/mmod_human_face_detector.dat.bz2" << endl;
+        cout << "./facedetect mmod_human_face_detector.dat shape_predictor_68_face_landmarks.dat faces/*.jpg" << endl;
         return 0;
     }
 
     net_type net;
-    deserialize(argv[1]) >> net;  
+    deserialize(argv[1]) >> net;
 
-    for (int i = 2; i < argc; ++i)
+    shape_predictor sp;
+    deserialize(argv[2]) >> sp;
+
+    json response;
+
+    for (int i = 3; i < argc; ++i)
     {
-        long start = duration_cast< milliseconds >(
-                system_clock::now().time_since_epoch()
-        ).count();
+        long start = duration_cast< milliseconds >(system_clock::now().time_since_epoch()).count();
 
         matrix<rgb_pixel> img;
         load_image(img, argv[i]);
@@ -99,77 +111,36 @@ int main(int argc, char** argv) try
         // process them individually in this example.
 
         auto dets = net(img);
-        long finish = duration_cast< milliseconds >(
-                system_clock::now().time_since_epoch()
-        ).count();
 
-
-        cout
-                << "path"
-                << ","
-                << "count"
-                << ","
-                << "left"
-                << ","
-                << "top"
-                << ","
-                << "right"
-                << ","
-                << "bottom"
-                << ","
-                << "width"
-                << ","
-                << "height"
-                << ","
-                << "time"
-                << endl;
+        json imageJson;
+        imageJson["path"] = argv[i];
+        imageJson["count"] = dets.size();
+        imageJson["time"] = duration_cast< milliseconds >(system_clock::now().time_since_epoch()).count() - start;
 
         if (!dets.empty()) {
+            json faces;
             for (auto &&d : dets) {
-                cout
-                        << argv[i]
-                        << ","
-                        << dets.size()
-                        << ","
-                        << d.rect.left()
-                        << ","
-                        << d.rect.top()
-                        << ","
-                        << d.rect.right()
-                        << ","
-                        << d.rect.bottom()
-                        << ","
-                        << d.rect.width()
-                        << ","
-                        << d.rect.height()
-                        << ","
-                        << finish - start
-                        << endl;
+                full_object_detection shape = sp(img, d);
+                chip_details chip_locations = get_face_chip_details(shape);
+                faces.push_back({
+                     {"left", d.rect.left()},
+                     {"right", d.rect.right()},
+                     {"top", d.rect.top()},
+                     {"bottom", d.rect.bottom()},
+                     {"width", d.rect.width()},
+                     {"height", d.rect.height()},
+                     {"angle", chip_locations.angle},
+                     {"detectionConfidence", d.detection_confidence}
+                });
             }
-        } else {
-            cout
-                    << argv[i]
-                    << ","
-                    << 0
-                    << ","
-                    << 0
-                    << ","
-                    << 0
-                    << ","
-                    << 0
-                    << ","
-                    << 0
-                    << ","
-                    << 0
-                    << ","
-                    << 0
-                    << ","
-                    << finish - start
-                    << endl;
+            imageJson["faces"] = faces;
         }
+        response.push_back(imageJson);
     }
+    cout << response.dump(1) << endl;
 }
 catch(std::exception& e)
 {
     cout << e.what() << endl;
+    return 1;
 }
