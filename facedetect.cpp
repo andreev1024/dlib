@@ -116,6 +116,7 @@ int main(int argc, char** argv) try
         imageJson["path"] = argv[i];
         imageJson["count"] = dets.size();
         imageJson["time"] = duration_cast< milliseconds >(system_clock::now().time_since_epoch()).count() - start;
+        imageJson["faces"] = json::array();
 
         if (!dets.empty()) {
             json faces;
@@ -137,7 +138,7 @@ int main(int argc, char** argv) try
         }
         response.push_back(imageJson);
     }
-    cout << response.dump(1) << endl;
+    cout << response.dump() << endl;
 }
 catch(std::exception& e)
 {
